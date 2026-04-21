@@ -1,0 +1,337 @@
+
+
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>الطاقة الرقمية | Digital Energy</title>
+    
+    <!-- الخطوط -->
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Tajawal', 'sans-serif'] },
+                    colors: {
+                        darkBg: '#05050a',
+                        neonGreen: '#00ff41',
+                        neonBlue: '#00b8ff',
+                        neonPurple: '#b800ff'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            background-color: #05050a;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        /* تأثير خط المسح (Scan Line) */
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(to right, transparent, var(--theme-color, #00ff41), transparent);
+            box-shadow: 0 0 20px var(--theme-color, #00ff41), 0 0 40px var(--theme-color, #00ff41);
+            animation: scan 3s linear infinite;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0.6;
+        }
+
+        @keyframes scan {
+            0% { top: -10%; opacity: 0; }
+            10% { opacity: 0.8; }
+            90% { opacity: 0.8; }
+            100% { top: 110%; opacity: 0; }
+        }
+
+        /* تأثير النبض للدوائر */
+        .pulse-loader {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 2px solid var(--theme-color, #00ff41);
+            box-shadow: 0 0 20px var(--theme-color, #00ff41);
+            animation: pulse 1.5s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+
+        .glass-panel {
+            background: rgba(10, 10, 15, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* إخفاء فيديو الكاميرا الحقيقي تماماً */
+        .input_video {
+            display: none;
+        }
+    </style>
+</head>
+<body class="text-white h-screen w-screen relative">
+
+    <!-- الكاميرا المخفية -->
+    <video class="input_video"></video>
+
+    <!-- مساحة الرسم (اللوحة التجريدية) -->
+    <canvas id="output_canvas" class="absolute inset-0 w-full h-full z-0"></canvas>
+    
+    <!-- خط المسح الوهمي -->
+    <div class="scan-line" id="scanLine"></div>
+
+    <!-- واجهة المستخدم (UI) -->
+    <div class="absolute inset-0 z-20 flex flex-col justify-between p-6 pointer-events-none">
+        
+        <!-- الهيدر -->
+        <div class="flex justify-between items-start w-full">
+            <div class="glass-panel px-6 py-3 rounded-2xl">
+                <h1 class="text-2xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-l from-white to-gray-400">
+                    نظام <span id="themeText" class="text-neonGreen drop-shadow-[0_0_10px_rgba(0,255,65,0.8)]">الطاقة</span>
+                </h1>
+                <p class="text-sm text-gray-400 mt-1">تتبع رقمي تجريدي | لا يتم عرض صور حقيقية</p>
+            </div>
+
+            <!-- أزرار الألوان (الثيمات) -->
+            <div class="flex gap-3 pointer-events-auto">
+                <button onclick="setTheme('green')" class="w-10 h-10 rounded-full bg-neonGreen shadow-[0_0_15px_#00ff41] border-2 border-white transition transform hover:scale-110"></button>
+                <button onclick="setTheme('blue')" class="w-10 h-10 rounded-full bg-neonBlue shadow-[0_0_15px_#00b8ff] border-2 border-transparent transition transform hover:scale-110"></button>
+                <button onclick="setTheme('purple')" class="w-10 h-10 rounded-full bg-neonPurple shadow-[0_0_15px_#b800ff] border-2 border-transparent transition transform hover:scale-110"></button>
+            </div>
+        </div>
+
+        <!-- الفوتر / زر الالتقاط -->
+        <div class="flex justify-center w-full pb-4 pointer-events-auto">
+            <button id="captureBtn" class="glass-panel group relative px-8 py-4 rounded-full font-bold text-lg overflow-hidden transition-all hover:scale-105 active:scale-95">
+                <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                <span class="flex items-center gap-3">
+                    📸 التقاط وتنزيل الصورة
+                </span>
+            </button>
+        </div>
+    </div>
+
+    <!-- شاشة التحميل -->
+    <div id="loadingScreen" class="absolute inset-0 z-50 bg-darkBg flex flex-col items-center justify-center transition-opacity duration-700">
+        <div class="pulse-loader mb-8"></div>
+        <h2 class="text-3xl font-bold mb-2">جاري تهيئة النظام...</h2>
+        <p class="text-gray-400">يرجى السماح باستخدام الكاميرا وتوجيه يدك</p>
+    </div>
+
+    <script>
+        // --- إعدادات النظام والألوان ---
+        const themes = {
+            green: { color: '#00ff41', name: 'الطاقة' },
+            blue: { color: '#00b8ff', name: 'الأشعة' },
+            purple: { color: '#b800ff', name: 'النيون' }
+        };
+        
+        let currentTheme = themes.green;
+        const root = document.documentElement;
+
+        function setTheme(themeKey) {
+            currentTheme = themes[themeKey];
+            root.style.setProperty('--theme-color', currentTheme.color);
+            
+            const themeText = document.getElementById('themeText');
+            themeText.innerText = currentTheme.name;
+            themeText.className = `drop-shadow-[0_0_10px_${currentTheme.color}]`;
+            themeText.style.color = currentTheme.color;
+
+            // تحديث حدود الأزرار
+            document.querySelectorAll('button[onclick^="setTheme"]').forEach(btn => {
+                btn.classList.remove('border-white');
+                btn.classList.add('border-transparent');
+                if(btn.getAttribute('onclick').includes(themeKey)) {
+                    btn.classList.remove('border-transparent');
+                    btn.classList.add('border-white');
+                }
+            });
+        }
+
+        // --- إعدادات Canvas ---
+        const canvas = document.getElementById('output_canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        function resizeCanvas() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- الروابط التشريحية لليد (لرسم الخطوط المجردة) ---
+        const HAND_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 4], // الإبهام
+            [0, 5], [5, 6], [6, 7], [7, 8], // السبابة
+            [5, 9], [9, 10], [10, 11], [11, 12], // الوسطى
+            [9, 13], [13, 14], [14, 15], [15, 16], // البنصر
+            [13, 17], [0, 17], [17, 18], [18, 19], [19, 20] // الخنصر
+        ];
+
+        // --- نظام الذكاء الاصطناعي (MediaPipe) ---
+        const videoElement = document.getElementsByClassName('input_video')[0];
+        let isLoaded = false;
+        let activeLandmarks = [];
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 2, // يسمح بتتبع يدين معاً
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults((results) => {
+            if (!isLoaded) {
+                document.getElementById('loadingScreen').style.opacity = '0';
+                setTimeout(() => document.getElementById('loadingScreen').classList.add('hidden'), 700);
+                isLoaded = true;
+            }
+            activeLandmarks = results.multiHandLandmarks || [];
+        });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start().catch(err => {
+            alert("يرجى السماح باستخدام الكاميرا ليعمل النظام.");
+        });
+
+        // --- حلقة الرسم (Render Loop) ---
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            for(let i=0; i<width; i+=gridSize) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,height); ctx.stroke(); }
+            for(let i=0; i<height; i+=gridSize) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(width,i); ctx.stroke(); }
+        }
+
+        function render() {
+            // 1. تأثير الأثر (Trail Effect) - بدلاً من مسح الشاشة بالكامل، نرسم طبقة شفافة
+            ctx.fillStyle = 'rgba(5, 5, 10, 0.15)'; 
+            ctx.fillRect(0, 0, width, height);
+
+            // رسم الشبكة الخلفية
+            drawGrid();
+
+            // 2. رسم النقاط العصبية والطاقة
+            if (activeLandmarks.length > 0) {
+                ctx.save();
+                // عكس الشاشة لتصبح مثل المرآة
+                ctx.translate(width, 0);
+                ctx.scale(-1, 1);
+
+                activeLandmarks.forEach(landmarks => {
+                    
+                    // رسم الخطوط (الهيكل الرقمي)
+                    ctx.strokeStyle = currentTheme.color;
+                    ctx.lineWidth = 2;
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = currentTheme.color;
+                    ctx.globalAlpha = 0.6; // شفافية الخطوط
+
+                    HAND_CONNECTIONS.forEach(([i, j]) => {
+                        const p1 = landmarks[i];
+                        const p2 = landmarks[j];
+                        ctx.beginPath();
+                        ctx.moveTo(p1.x * width, p1.y * height);
+                        ctx.lineTo(p2.x * width, p2.y * height);
+                        ctx.stroke();
+                    });
+
+                    // رسم النقاط (الخلايا العصبية/الطاقة)
+                    ctx.globalAlpha = 1.0;
+                    landmarks.forEach((point, index) => {
+                        const x = point.x * width;
+                        const y = point.y * height;
+                        
+                        // النقطة الأساسية
+                        ctx.beginPath();
+                        // أطراف الأصابع تكون أكبر وأكثر توهجاً
+                        const isTip = [4, 8, 12, 16, 20].includes(index);
+                        const radius = isTip ? 6 : 3;
+                        
+                        ctx.arc(x, y, radius, 0, Math.PI * 2);
+                        ctx.fillStyle = '#ffffff'; // قلب النقطة أبيض
+                        ctx.shadowBlur = isTip ? 25 : 15;
+                        ctx.shadowColor = currentTheme.color;
+                        ctx.fill();
+
+                        // هالة حول النقطة
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+                        ctx.strokeStyle = currentTheme.color;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    });
+                });
+                ctx.restore();
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        // بدء حلقة الرسم
+        setTheme('green'); // تهيئة اللون الافتراضي
+        requestAnimationFrame(render);
+
+        // --- وظيفة التقاط الصورة (Capture) ---
+        document.getElementById('captureBtn').addEventListener('click', () => {
+            // إضافة فلاش أبيض خفيف عند الالتقاط
+            const flash = document.createElement('div');
+            flash.className = 'absolute inset-0 bg-white z-50 pointer-events-none transition-opacity duration-500';
+            document.body.appendChild(flash);
+            
+            setTimeout(() => {
+                flash.style.opacity = '0';
+                setTimeout(() => flash.remove(), 500);
+            }, 50);
+
+            // تحويل الـ Canvas إلى صورة
+            const dataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = `Digital_Energy_${Date.now()}.png`;
+            link.href = dataURL;
+            link.click();
+        });
+
+    </script>
+</body>
+</html>
+
+
